@@ -1,0 +1,57 @@
+cat <<EOF >/root/keystonerc_admin 
+export OS_USERNAME=admin
+export OS_TENANT_NAME=admin
+export OS_PASSWORD=adminh3c.
+export OS_AUTH_URL=http://172.16.20.101:5000/v2.0/
+export OS_REGION_NAME=RegionOne
+export PS1='[\u@\h \W(keystone_admin)]\$ '
+EOF
+
+cat <<EOF >/root/keystonerc_cloud 
+export OS_USERNAME=user1
+export OS_TENANT_NAME=cloud
+export OS_PASSWORD=0123
+export OS_AUTH_URL=http://172.16.20.101:5000/v2.0/
+export OS_REGION_NAME=RegionOne
+export PS1='[\u@\h \W(keystone_cloud)]\$ '
+EOF
+
+管理员操作
+#创建项目及其用户(admin操作)
+keystone tenant-create --name cloud --description "is a local cloud LAB"
+keystone user-create --name user1 --pass 0123 --enabled true --tenant cloud 
+
+#创建镜像(admin操作)
+glance image-create --name cirros --disk-format qcow2 --container-format bare --is-public true --file /iso/cirros-0.5.2-x86_64-disk.img --progress 
+
+#创建规格(admin操作)
+nova flavor-create --is-public true m2.2210 6 2048 10 2
+
+#创建一个外部网络，设置router:external及shared 参数为true （admin操作）
+neutron net-create public 
+neutron net-update --router:external=true --shared=true public
+neutron subnet-create --name global1 --allocation-pool start=192.168.124.200,end=192.168.124.220 --disable-dhcp --gateway 192.168.124.254 --ip-version 4 public 192.168.124.0/24
+
+cloud项目用户操作
+#创建lan1 lan2 两个网络以及sub66 sub88 两个子网
+neutron net-create lan1
+neutron net-create lan2
+
+neutron subnet-create --name net66 --allocation-pool start=192.168.66.100,end=192.168.66.120 --gateway 192.168.66.254 --disable-dhcp --ip-version 4 --dns-nameserver 114.114.114.114 lan1 192.168.66.0/24
+
+neutron subnet-create --name net88 --allocation-pool start=192.168.88.100,end=192.168.88.120 --gateway 192.168.88.254 --disable-dhcp --ip-version 4 --dns-nameserver 114.114.114.114 lan2 192.168.88.0/24
+
+#创建安全给，并设置两条入方向规则
+neutron security-group-create sg01
+neutron security-group-rule-create --direction ingress --protocol icmp sg01
+neutron security-group-rule-create --direction ingress --protocol tcp --port-range-min 22 --port-range-max 22 sg01
+
+#创建vm1 vm2 两台虚拟机，两台主机所在网络不同，网络不能互通
+nova boot --flavor m2.2210 --image cirros --min-count 1 --security-groups sg01 --nic net-id=118531ef-d551-45ad-b1c2-e4ac653c5cb4 vm1
+nova boot --flavor m2.2210 --image cirros --min-count 1 --security-groups sg01 --nic net-id=d0cb637a-ea75-44c3-90c8-4f1f40f58a04 vm2
+
+#创建名为route1 的路由器
+neutron router-create route1
+neutron router-interface-add route1 subnet66	#增加接口连接到sub66子网所在网络
+neutron router-interface-add route1 sub88	#增加接口连接到sub88子网所在网络
+neutron router-gateway-set route1 public	#路由器网关指向public网络 类似0.0.0.0 0.0.0.0 public 
